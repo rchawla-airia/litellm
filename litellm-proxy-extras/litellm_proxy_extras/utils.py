@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Final, Optional
 
 from litellm_proxy_extras._logging import logger
 from litellm_proxy_extras.replica_identity import (
@@ -277,13 +277,23 @@ class ProxyExtrasDBManager:
             pass
 
     @staticmethod
-    def _failed_migration_logs(migration_name: str) -> str:
+    def _failed_migration_logs(migration_name: str) -> Optional[str]:
         """Logs recorded on the migration's failed _prisma_migrations row.
 
         P3009 stderr does not carry the original failure, so this is the only
         way to tell a migration that lost a deadlock race against a concurrent
-        migrate deploy from one whose SQL is genuinely broken. Returns "" when
-        psycopg is missing, the DB is unreachable, or no failed row exists.
+        migrate deploy from one whose SQL is genuinely broken.
+
+        Returns:
+            - ``None`` when no failed row exists for this migration. Between
+              P3009 firing and this query, a peer replica that also lost the
+              deadlock may have already marked the row rolled back (or started
+              a new in-progress attempt with empty logs). The caller should
+              treat this as "peer already repaired the ledger, retry".
+            - ``""`` when we cannot check the ledger (DATABASE_URL missing,
+              psycopg unavailable, or the DB is unreachable). The caller must
+              stay conservative here.
+            - The row's ``logs`` text otherwise.
         """
         database_url = os.getenv("DATABASE_URL")
         if not database_url:
@@ -309,13 +319,15 @@ class ProxyExtrasDBManager:
                     psycopg.sql.SQL(
                         "SELECT logs FROM {} "
                         "WHERE migration_name = %s AND finished_at IS NULL "
-                        "AND rolled_back_at IS NULL"
+                        "AND rolled_back_at IS NULL AND logs IS NOT NULL"
                     ).format(ledger_table),
                     (migration_name,),
                 ).fetchone()
         except (psycopg.OperationalError, psycopg.DatabaseError):
             return ""
-        return (row[0] or "") if row else ""
+        if row is None:
+            return None
+        return row[0] or ""
 
     @staticmethod
     def _resolve_specific_migration(migration_name: str):
@@ -825,22 +837,33 @@ class ProxyExtrasDBManager:
                                     f"Detail: {resolve_err}"
                                 ) from resolve_err
                             continue
-                        if migration_match and _MIGRATION_DEADLOCK_MARKER in (
-                            ProxyExtrasDBManager._failed_migration_logs(
-                                migration_match.group(1)
+                        if migration_match:
+                            failed_logs: Final = (
+                                ProxyExtrasDBManager._failed_migration_logs(
+                                    migration_match.group(1)
+                                )
                             )
-                        ):
-                            logger.info(
-                                "Migration %s lost a deadlock race against a "
-                                "concurrent migrate deploy, rolling its ledger "
-                                "row back and retrying",
-                                migration_match.group(1),
-                            )
-                            ProxyExtrasDBManager._roll_back_migration_best_effort(
-                                migration_match.group(1)
-                            )
-                            time.sleep(random.randrange(5, 15))
-                            continue
+                            if failed_logs is None:
+                                logger.info(
+                                    "Migration %s has no failed ledger row "
+                                    "anymore, a peer replica likely rolled it "
+                                    "back after a deadlock race, retrying",
+                                    migration_match.group(1),
+                                )
+                                time.sleep(random.randrange(5, 15))
+                                continue
+                            if _MIGRATION_DEADLOCK_MARKER in failed_logs:
+                                logger.info(
+                                    "Migration %s lost a deadlock race against a "
+                                    "concurrent migrate deploy, rolling its ledger "
+                                    "row back and retrying",
+                                    migration_match.group(1),
+                                )
+                                ProxyExtrasDBManager._roll_back_migration_best_effort(
+                                    migration_match.group(1)
+                                )
+                                time.sleep(random.randrange(5, 15))
+                                continue
                         raise RuntimeError(
                             "Database migration failed and cannot be auto-recovered. "
                             f"Manual intervention required.\n\nPrisma error:\n{stderr}"

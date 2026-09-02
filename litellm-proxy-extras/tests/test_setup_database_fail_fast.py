@@ -371,6 +371,43 @@ def test_v2_p3009_non_deadlock_ledger_row_still_raises(monkeypatch, tmp_path):
             ProxyExtrasDBManager.setup_database(use_migrate=True, use_v2_resolver=True)
 
 
+def test_v2_p3009_no_failed_row_retries_after_peer_rollback(monkeypatch, tmp_path):
+    """v2: P3009 fired, but by the time we check the ledger a peer replica
+    that also lost the deadlock has already rolled the failed row back (so
+    `_failed_migration_logs` returns None). The survivor must retry, not
+    raise: the ledger is already clean and the next `migrate deploy` will
+    succeed."""
+    _stub_v2_env(monkeypatch, tmp_path)
+
+    stderr = (
+        "Error: P3009\n"
+        "migrate found failed migrations in the target database\n"
+        "The `20260415120000_health_check_latest_per_model_index` migration "
+        "started at 2026-09-01 18:46:13 UTC failed"
+    )
+    monkeypatch.setattr(
+        ProxyExtrasDBManager,
+        "_failed_migration_logs",
+        lambda name: None,
+    )
+    monkeypatch.setattr(
+        ProxyExtrasDBManager,
+        "_roll_back_migration",
+        lambda name: pytest.fail(
+            "survivor must not roll back what the peer already rolled back"
+        ),
+    )
+    monkeypatch.setattr(
+        ProxyExtrasDBManager,
+        "_resolve_specific_migration",
+        lambda name: pytest.fail("a deadlocked migration must never be marked applied"),
+    )
+    monkeypatch.setattr("subprocess.run", _succeed_after(1, stderr))
+
+    ok = ProxyExtrasDBManager.setup_database(use_migrate=True, use_v2_resolver=True)
+    assert ok is True
+
+
 def test_v2_bare_deadlock_stderr_retries(monkeypatch, tmp_path):
     """v2: a deadlock reported without a Prisma error code (the advisory-lock
     waiter as victim) is retried, not fatal."""
