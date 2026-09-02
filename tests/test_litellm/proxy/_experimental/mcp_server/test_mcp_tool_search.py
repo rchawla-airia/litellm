@@ -21,6 +21,7 @@ from litellm.proxy._experimental.mcp_server.tool_search import (
     AGENT_SEARCH_TOOL_NAME,
     MCP_TOOL_CALL_TOOL_NAME,
     MCP_TOOL_SEARCH_TOOL_NAME,
+    SKILL_SEARCH_TOOL_NAME,
     coerce_top_k,
     get_virtual_tool_definitions,
     search_tools,
@@ -115,8 +116,8 @@ class TestSearchTools:
 
 
 class TestGetVirtualToolDefinitions:
-    def test_returns_three_tools(self) -> None:
-        assert len(get_virtual_tool_definitions()) == 3
+    def test_returns_four_tools(self) -> None:
+        assert len(get_virtual_tool_definitions()) == 4
 
     def test_agent_search_schema_requires_query(self) -> None:
         tools = get_virtual_tool_definitions()
@@ -173,6 +174,7 @@ class TestGetVirtualToolDefinitions:
             MCP_TOOL_SEARCH_TOOL_NAME,
             MCP_TOOL_CALL_TOOL_NAME,
             AGENT_SEARCH_TOOL_NAME,
+            SKILL_SEARCH_TOOL_NAME,
         }
 
 
@@ -207,7 +209,12 @@ class TestListToolRestApiWithToolSearch:
 
         assert result["error"] is None
         tool_names = [t["name"] for t in result["tools"]]
-        assert set(tool_names) == {MCP_TOOL_SEARCH_TOOL_NAME, MCP_TOOL_CALL_TOOL_NAME, AGENT_SEARCH_TOOL_NAME}
+        assert set(tool_names) == {
+            MCP_TOOL_SEARCH_TOOL_NAME,
+            MCP_TOOL_CALL_TOOL_NAME,
+            AGENT_SEARCH_TOOL_NAME,
+            SKILL_SEARCH_TOOL_NAME,
+        }
 
     @pytest.mark.asyncio
     async def test_returns_full_catalog_when_flag_disabled(self) -> None:
@@ -982,6 +989,7 @@ class TestHandleListToolsVirtual:
             MCP_TOOL_SEARCH_TOOL_NAME,
             MCP_TOOL_CALL_TOOL_NAME,
             AGENT_SEARCH_TOOL_NAME,
+            SKILL_SEARCH_TOOL_NAME,
         }
 
 
