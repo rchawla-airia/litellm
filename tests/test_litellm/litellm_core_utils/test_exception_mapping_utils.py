@@ -1013,6 +1013,48 @@ def test_an_unmapped_exception_with_no_model_or_provider_is_a_connection_error(q
     assert "boom" in raised.value.message
 
 
+def _raise_and_map(
+    model: str | None, original_exception: Exception, custom_llm_provider: str | None
+) -> None:
+    """Mirrors how litellm/main.py calls exception_type(): from inside the
+    except block of the original error, so traceback.format_exc() reflects
+    a real call stack rather than an empty one."""
+    try:
+        raise original_exception
+    except type(original_exception) as caught:
+        exception_type(
+            model=model,
+            original_exception=caught,
+            custom_llm_provider=custom_llm_provider,
+        )
+
+
+def test_an_unmapped_exception_message_excludes_traceback(quiet_exception_mapping):
+    with pytest.raises(litellm.APIConnectionError) as raised:
+        _raise_and_map(
+            model="MiniMax-M2.5",
+            original_exception=RuntimeError("socket hung up"),
+            custom_llm_provider="minimax",
+        )
+
+    assert "Traceback (most recent call last)" not in raised.value.message
+    assert "test_exception_mapping_utils.py" not in raised.value.message
+
+
+def test_an_unmapped_exception_with_no_model_or_provider_message_excludes_traceback(
+    quiet_exception_mapping,
+):
+    with pytest.raises(litellm.APIConnectionError) as raised:
+        _raise_and_map(
+            model=None,
+            original_exception=ValueError("boom"),
+            custom_llm_provider=None,
+        )
+
+    assert "Traceback (most recent call last)" not in raised.value.message
+    assert "test_exception_mapping_utils.py" not in raised.value.message
+
+
 CONTEXT_WINDOW_MESSAGE = "This model's maximum context length is 4096 tokens."
 CONTENT_POLICY_MESSAGE = (
     '{"error": {"type": "invalid_request_error", "code": "content_policy_violation"}}'

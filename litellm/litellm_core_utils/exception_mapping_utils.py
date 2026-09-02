@@ -2647,8 +2647,13 @@ def exception_type(
                     request=getattr(original_exception, "request", None),
                 )
             else:
+                verbose_logger.error(
+                    "litellm.exception_type(): unmapped exception - %s\n%s",
+                    error_str,
+                    _redact_string(traceback.format_exc()),
+                )
                 raise APIConnectionError(
-                    message=f"{original_exception}\n{_redact_string(traceback.format_exc())}",
+                    message=f"{exception_provider} - {error_str}",
                     llm_provider=custom_llm_provider,
                     model=model,
                     request=httpx.Request(method="POST", url="https://api.openai.com/v1/"),  # stub the request
@@ -2673,8 +2678,12 @@ def exception_type(
                 if isinstance(e, error_type):
                     setattr(e, "litellm_response_headers", litellm_response_headers)
                     raise e  # it's already mapped
+            verbose_logger.error(
+                "litellm.exception_type(): unmapped exception while mapping\n%s",
+                _redact_string(traceback.format_exc()),
+            )
             raised_exc: Final = APIConnectionError(
-                message=f"{original_exception}\n{_redact_string(traceback.format_exc())}",
+                message=f"{original_exception}",
                 llm_provider="",
                 model="",
             )
