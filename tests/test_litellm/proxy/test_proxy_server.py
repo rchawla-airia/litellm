@@ -10801,6 +10801,7 @@ def _run_init_cache_with_backend(cache_backend, redis_env_kwargs):
         patch.object(proxy_server_module, "redis_usage_cache", None),
         patch.object(proxy_server_module, "spend_counter_cache", fresh_spend_cache),
         patch.object(proxy_server_module, "user_api_key_cache", DualCache()),
+        patch.object(proxy_server_module, "cli_sso_session_cache", DualCache()),
         patch.object(proxy_server_module, "llm_router", None),
         patch.object(proxy_server_module, "litellm_config_cache", fresh_config_cache),
         patch.object(proxy_server_module, "RedisCache", _EnvBuiltRedisCache),
@@ -10881,6 +10882,7 @@ def _run_init_coordination_redis(config, env=None):
         patch.object(proxy_server_module, "redis_usage_cache", None),
         patch.object(proxy_server_module, "spend_counter_cache", fresh_spend_cache),
         patch.object(proxy_server_module, "user_api_key_cache", DualCache()),
+        patch.object(proxy_server_module, "cli_sso_session_cache", DualCache()),
         patch.object(proxy_server_module, "litellm_config_cache", fresh_config_cache),
         patch.object(proxy_server_module, "RedisCache", _EnvBuiltRedisCache),
         patch.object(proxy_server_module, "RedisClusterCache", _EnvBuiltClusterCache),
@@ -10974,6 +10976,7 @@ def test_explicit_coordination_redis_takes_precedence_over_cache_backend():
         patch.object(proxy_server_module, "redis_usage_cache", None),
         patch.object(proxy_server_module, "spend_counter_cache", fresh_spend_cache),
         patch.object(proxy_server_module, "user_api_key_cache", DualCache()),
+        patch.object(proxy_server_module, "cli_sso_session_cache", DualCache()),
         patch.object(proxy_server_module, "llm_router", None),
         patch.object(proxy_server_module, "litellm_config_cache", fresh_config_cache),
         patch.object(proxy_server_module, "RedisCache", _EnvBuiltRedisCache),
@@ -10993,6 +10996,59 @@ def test_explicit_coordination_redis_takes_precedence_over_cache_backend():
         assert usage_cache is not cache_backend
         assert usage_cache.init_kwargs["host"] == "explicit-coord-host"
         assert fresh_spend_cache.redis_cache is usage_cache
+
+
+def _run_init_coordination_redis_env_fallback(litellm_settings, redis_env_kwargs):
+    """Run ProxyConfig._init_coordination_redis_env_fallback against a
+    stubbed module state and a controlled REDIS_* environment, returning
+    (built, spend_counter redis)."""
+    fresh_spend_cache = DualCache()
+    fresh_config_cache = types.SimpleNamespace(redis_cache=None)
+
+    with (
+        patch.object(proxy_server_module, "spend_counter_cache", fresh_spend_cache),
+        patch.object(proxy_server_module, "user_api_key_cache", DualCache()),
+        patch.object(proxy_server_module, "cli_sso_session_cache", DualCache()),
+        patch.object(proxy_server_module, "litellm_config_cache", fresh_config_cache),
+        patch.object(proxy_server_module, "RedisCache", _EnvBuiltRedisCache),
+        patch.object(proxy_server_module, "RedisClusterCache", _EnvBuiltClusterCache),
+        patch(
+            "litellm._redis._redis_kwargs_from_environment",
+            return_value=redis_env_kwargs,
+        ),
+    ):
+        built = proxy_server_module.ProxyConfig._init_coordination_redis_env_fallback(
+            litellm_settings=litellm_settings
+        )
+        return built, fresh_spend_cache.redis_cache
+
+
+def test_init_coordination_redis_env_fallback_builds_from_environment():
+    """A deployment with no coordination_redis block and no litellm_settings.cache
+    but with bare REDIS_HOST/REDIS_PORT env vars must still get a coordination
+    Redis: otherwise spend counters, budget-window enforcement, and the
+    reset_spend cache-eviction broadcast stay per-pod local and a reset issued
+    on one pod never clears another pod's stale enforcement (LIT DevRev)."""
+    built, spend_redis = _run_init_coordination_redis_env_fallback(
+        litellm_settings={},
+        redis_env_kwargs={"host": "env-fallback-host", "port": "6390"},
+    )
+
+    assert isinstance(built, _EnvBuiltRedisCache)
+    assert built.init_kwargs["host"] == "env-fallback-host"
+    assert spend_redis is built
+
+
+def test_init_coordination_redis_env_fallback_without_redis_env_returns_none():
+    """With no REDIS_* connection info at all, the fallback must leave the
+    coordination Redis unset rather than building a broken client."""
+    built, spend_redis = _run_init_coordination_redis_env_fallback(
+        litellm_settings={},
+        redis_env_kwargs={},
+    )
+
+    assert built is None
+    assert spend_redis is None
 
 
 def test_env_fallback_builds_cluster_client_from_cluster_nodes_env():
@@ -11038,6 +11094,7 @@ async def test_startup_applies_coordination_redis_saved_in_database():
     with (
         patch.object(proxy_server_module, "spend_counter_cache", fresh_spend_cache),
         patch.object(proxy_server_module, "user_api_key_cache", DualCache()),
+        patch.object(proxy_server_module, "cli_sso_session_cache", DualCache()),
         patch.object(proxy_server_module, "litellm_config_cache", fresh_config_cache),
         patch.object(proxy_server_module, "RedisCache", _EnvBuiltRedisCache),
         patch.object(proxy_server_module, "RedisClusterCache", _EnvBuiltClusterCache),

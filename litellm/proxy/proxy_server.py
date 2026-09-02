@@ -4743,6 +4743,32 @@ class ProxyConfig:
         )
         return coordination_redis_cache
 
+    @staticmethod
+    def _init_coordination_redis_env_fallback(litellm_settings: Mapping[str, object]) -> RedisCache | None:
+        """
+        Last-resort coordination Redis, tried after an explicit
+        `general_settings.coordination_redis` block and `litellm_settings.cache`
+        have both had a chance to resolve one. Without this, a deployment that
+        only exports REDIS_HOST/REDIS_PORT (no cache block, no coordination_redis
+        block) gets NO cross-pod coordination at all: spend counters, budget-window
+        enforcement, and the reset_spend cache-eviction broadcast all silently stay
+        per-pod local, so a key reset on one pod never clears another pod's stale
+        enforcement.
+        """
+        env_coordination_redis_cache: Final = _build_redis_usage_cache_from_environment()
+        if env_coordination_redis_cache is None:
+            return None
+        _attach_redis_usage_cache(
+            env_coordination_redis_cache,
+            enable_redis_auth_cache=litellm_settings.get("enable_redis_auth_cache", False) is True,
+        )
+        verbose_proxy_logger.info(
+            "coordination_redis: using a standalone Redis built from REDIS_* "
+            "environment variables for usage tracking, rate limiting, and "
+            "cross-pod coordination."
+        )
+        return env_coordination_redis_cache
+
     def _init_cache(
         self,
         cache_params: dict,
@@ -5410,6 +5436,13 @@ class ProxyConfig:
 
                         reset_audit_log_callback_cache()
                         _in_memory_loggers[:] = [cb for cb in _in_memory_loggers if not isinstance(cb, S3V2Logger)]
+
+        if redis_usage_cache is None:
+            env_coordination_redis_cache: Final = self._init_coordination_redis_env_fallback(
+                litellm_settings=litellm_settings
+            )
+            if env_coordination_redis_cache is not None:
+                _set_redis_usage_cache(env_coordination_redis_cache)
 
         ## GENERAL SERVER SETTINGS (e.g. master key,..) # do this after initializing litellm, to ensure sentry logging works for proxylogging
         general_settings = config.get("general_settings", {})
