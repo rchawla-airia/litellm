@@ -1077,3 +1077,128 @@ def test_public_mcp_hub_does_not_expose_upstream_url():
     assert all("url" not in item for item in data)
     assert secret_url not in response.text
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def reset_autorouter_presets_cache():
+    from litellm.proxy.public_endpoints.public_endpoints import _AutoRouterPresetsCache
+
+    _AutoRouterPresetsCache.fetched = None
+    _AutoRouterPresetsCache.fetched_at = 0.0
+    yield
+    _AutoRouterPresetsCache.fetched = None
+    _AutoRouterPresetsCache.fetched_at = 0.0
+
+
+def test_get_autorouter_presets_local_mode_serves_bundled_catalog(
+    monkeypatch, reset_autorouter_presets_cache
+):
+    monkeypatch.setenv("LITELLM_LOCAL_AUTOROUTER_PRESETS", "True")
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    response = client.get("/public/autorouter_presets")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "anthropic_family" in payload
+    for preset in payload.values():
+        assert isinstance(preset["label"], str)
+        assert isinstance(preset["description"], str)
+        assert "tiers" in preset["complexity_router_config"]
+
+
+@pytest.mark.asyncio
+async def test_get_autorouter_presets_serves_and_caches_remote_catalog(
+    monkeypatch, reset_autorouter_presets_cache
+):
+    from litellm.proxy.public_endpoints.public_endpoints import (
+        _AUTOROUTER_PRESETS_ADAPTER,
+        get_autorouter_presets,
+    )
+
+    monkeypatch.delenv("LITELLM_LOCAL_AUTOROUTER_PRESETS", raising=False)
+    remote = _AUTOROUTER_PRESETS_ADAPTER.validate_python(
+        {
+            "remote_only": {
+                "label": "Remote Only",
+                "description": "from the remote catalog",
+                "complexity_router_config": {"tiers": {"SIMPLE": ["m1"]}},
+            }
+        }
+    )
+    calls = []
+
+    async def fake_fetch(url):
+        calls.append(url)
+        return remote
+
+    first = await get_autorouter_presets(url="https://example.test/presets.json", fetch=fake_fetch)
+    second = await get_autorouter_presets(url="https://example.test/presets.json", fetch=fake_fetch)
+
+    assert first == remote
+    assert second == remote
+    assert calls == ["https://example.test/presets.json"]
+
+
+@pytest.mark.asyncio
+async def test_get_autorouter_presets_falls_back_to_bundled_on_remote_failure(
+    monkeypatch, reset_autorouter_presets_cache
+):
+    from litellm.proxy.public_endpoints.public_endpoints import get_autorouter_presets
+
+    monkeypatch.delenv("LITELLM_LOCAL_AUTOROUTER_PRESETS", raising=False)
+
+    async def broken_fetch(url):
+        raise ValueError("remote catalog unavailable")
+
+    presets = await get_autorouter_presets(url="https://example.test/presets.json", fetch=broken_fetch)
+
+    assert "anthropic_family" in presets
+
+
+@pytest.mark.asyncio
+async def test_fetch_remote_autorouter_presets_rejects_wrong_shapes():
+    from pydantic import ValidationError
+
+    from litellm.proxy.public_endpoints.public_endpoints import _AUTOROUTER_PRESETS_ADAPTER
+
+    with pytest.raises(ValidationError):
+        _AUTOROUTER_PRESETS_ADAPTER.validate_python({"bad": {"label": "no description or config"}})
+    with pytest.raises(ValidationError):
+        _AUTOROUTER_PRESETS_ADAPTER.validate_python(["not", "a", "mapping"])
+
+
+def test_get_autorouter_presets_passes_unknown_catalog_fields_through(
+    monkeypatch, reset_autorouter_presets_cache
+):
+    import time as time_module
+
+    from litellm.proxy.public_endpoints.public_endpoints import (
+        _AUTOROUTER_PRESETS_ADAPTER,
+        _AutoRouterPresetsCache,
+    )
+
+    monkeypatch.delenv("LITELLM_LOCAL_AUTOROUTER_PRESETS", raising=False)
+    _AutoRouterPresetsCache.fetched = _AUTOROUTER_PRESETS_ADAPTER.validate_python(
+        {
+            "future_preset": {
+                "label": "Future",
+                "description": "carries fields this proxy version does not know",
+                "complexity_router_config": {"tiers": {"SIMPLE": ["m1"]}, "future_config_knob": 3},
+                "icon": "sparkles",
+            }
+        }
+    )
+    _AutoRouterPresetsCache.fetched_at = time_module.time()
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    response = client.get("/public/autorouter_presets")
+
+    assert response.status_code == 200
+    served = response.json()["future_preset"]
+    assert served["icon"] == "sparkles"
+    assert served["complexity_router_config"]["future_config_knob"] == 3

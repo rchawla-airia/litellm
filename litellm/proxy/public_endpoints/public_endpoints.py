@@ -1,11 +1,14 @@
 import json
 import os
 import re
-from collections.abc import Awaitable, Mapping, Sequence
+import time
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from importlib.resources import files
 from typing import TYPE_CHECKING, Final, Protocol
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import TypeAdapter
 from typing_extensions import ReadOnly, TypedDict
 
 import litellm
@@ -28,6 +31,7 @@ from litellm.types.proxy.management_endpoints.model_management_endpoints import 
 )
 from litellm.types.proxy.public_endpoints.public_endpoints import (
     AgentCreateInfo,
+    AutoRouterPresetRecord,
     ComplexityScorerDefaults,
     ProviderCreateInfo,
     PublicModelHubInfo,
@@ -462,6 +466,74 @@ async def get_litellm_blog_posts():
 
     posts: Final = [BlogPost(**p) for p in posts_data[:5]]
     return BlogPostsResponse(posts=posts)
+
+
+_AUTOROUTER_PRESETS_TTL_SECONDS: Final = 3600
+_AUTOROUTER_PRESETS_ADAPTER: Final = TypeAdapter(dict[str, AutoRouterPresetRecord])
+
+
+def _load_bundled_autorouter_presets() -> Mapping[str, AutoRouterPresetRecord]:
+    raw: Final = json.loads(
+        files("litellm.proxy.public_endpoints").joinpath("autorouter_presets.json").read_text(encoding="utf-8")
+    )
+    return _AUTOROUTER_PRESETS_ADAPTER.validate_python(raw)
+
+
+async def _fetch_remote_autorouter_presets(url: str) -> Mapping[str, AutoRouterPresetRecord]:
+    async with httpx.AsyncClient(timeout=5) as client:
+        response: Final = await client.get(url)
+    response.raise_for_status()
+    presets: Final = _AUTOROUTER_PRESETS_ADAPTER.validate_python(response.json())
+    if not presets:
+        raise ValueError("remote auto-router preset catalog is empty")
+    return presets
+
+
+class _AutoRouterPresetsCache:
+    fetched: Mapping[str, AutoRouterPresetRecord] | None = None
+    fetched_at: float = 0.0
+
+
+async def get_autorouter_presets(
+    url: str,
+    fetch: Callable[[str], Awaitable[Mapping[str, AutoRouterPresetRecord]]] = _fetch_remote_autorouter_presets,
+) -> Mapping[str, AutoRouterPresetRecord]:
+    if os.getenv("LITELLM_LOCAL_AUTOROUTER_PRESETS", "").lower() == "true":
+        return _load_bundled_autorouter_presets()
+
+    now: Final = time.time()
+    cached: Final = _AutoRouterPresetsCache.fetched
+    if cached is not None and now - _AutoRouterPresetsCache.fetched_at < _AUTOROUTER_PRESETS_TTL_SECONDS:
+        return cached
+
+    try:
+        fetched: Final = await fetch(url)
+    except Exception as e:
+        verbose_logger.warning(
+            "LiteLLM: failed to fetch auto-router presets from %s: %s. Serving the bundled catalog.", url, str(e)
+        )
+        return _load_bundled_autorouter_presets()
+
+    _AutoRouterPresetsCache.fetched = fetched
+    _AutoRouterPresetsCache.fetched_at = now
+    return fetched
+
+
+@router.get(
+    "/public/autorouter_presets",
+    tags=["public", "auto router"],  # mutable-ok: FastAPI route tags take a list
+    response_model=dict[str, AutoRouterPresetRecord],
+)
+async def get_public_autorouter_presets() -> Mapping[str, AutoRouterPresetRecord]:
+    """
+    Return the auto-router preset catalog the dashboard's template picker renders.
+
+    Fetches from ``litellm.autorouter_presets_url`` (override with ``LITELLM_AUTOROUTER_PRESETS_URL``)
+    with a 1-hour in-process cache, so a catalog change on the remote propagates without a dashboard
+    release. Falls back to the bundled catalog on any failure; set ``LITELLM_LOCAL_AUTOROUTER_PRESETS=True``
+    to serve the bundled catalog only.
+    """
+    return await get_autorouter_presets(url=litellm.autorouter_presets_url)
 
 
 @router.get(

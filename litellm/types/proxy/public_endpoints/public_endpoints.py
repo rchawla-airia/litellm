@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class PublicModelHubInfo(BaseModel):
@@ -71,6 +71,21 @@ class SupportedEndpoint(BaseModel):
 
 class SupportedEndpointsResponse(BaseModel):
     endpoints: list[SupportedEndpoint]
+
+
+class AutoRouterPresetRecord(BaseModel):
+    """One auto-router preset as served to the dashboard's template picker.
+
+    Only the envelope is validated; complexity_router_config passes through verbatim and unknown
+    fields are kept (extra="allow"), so a catalog published after this proxy shipped still serves
+    its new fields intact.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    label: str
+    description: str
+    complexity_router_config: Mapping[str, object]
 
 
 class ComplexityScorerDefaults(BaseModel):

@@ -12108,6 +12108,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/public/autorouter_presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Public Autorouter Presets
+         * @description Return the auto-router preset catalog the dashboard's template picker renders.
+         *
+         *     Fetches from ``litellm.autorouter_presets_url`` (override with ``LITELLM_AUTOROUTER_PRESETS_URL``)
+         *     with a 1-hour in-process cache, so a catalog change on the remote propagates without a dashboard
+         *     release. Falls back to the bundled catalog on any failure; set ``LITELLM_LOCAL_AUTOROUTER_PRESETS=True``
+         *     to serve the bundled catalog only.
+         */
+        get: operations["get_public_autorouter_presets_public_autorouter_presets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/public/complexity_router/scorer_defaults": {
         parameters: {
             query?: never;
@@ -23348,6 +23373,26 @@ export interface components {
             context_window_size: number;
             /** Tier Definitions */
             tier_definitions: components["schemas"]["TierDefinition"][];
+        };
+        /**
+         * AutoRouterPresetRecord
+         * @description One auto-router preset as served to the dashboard's template picker.
+         *
+         *     Only the envelope is validated; complexity_router_config passes through verbatim and unknown
+         *     fields are kept (extra="allow"), so a catalog published after this proxy shipped still serves
+         *     its new fields intact.
+         */
+        AutoRouterPresetRecord: {
+            /** Complexity Router Config */
+            complexity_router_config: {
+                [key: string]: unknown;
+            };
+            /** Description */
+            description: string;
+            /** Label */
+            label: string;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * AutoRouterRoutingTestRequest
@@ -54412,6 +54457,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentCreateInfo"][];
+                };
+            };
+        };
+    };
+    get_public_autorouter_presets_public_autorouter_presets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["AutoRouterPresetRecord"];
+                    };
                 };
             };
         };

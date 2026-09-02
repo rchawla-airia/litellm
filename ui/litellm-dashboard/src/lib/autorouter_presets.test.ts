@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
+import bundledPresets from "../../../../litellm/proxy/public_endpoints/autorouter_presets.json";
 import {
-  getAllPresets,
-  getPresetByKey,
+  hydratePresets,
+  AutoRouterPreset,
+  AutoRouterPresetsResponse,
   getRequiredModelsInPreset,
   getMissingModelsInPreset,
   getRequiredModels,
@@ -18,8 +20,15 @@ import { DEFAULT_ESCALATION_KEYWORDS } from "@/components/add_model/EscalationKe
 
 const groupsOnly = (models: Iterable<string>) => buildModelAvailability(models, []);
 
+// The catalog the proxy serves and falls back to. Hydrating it here keeps every expectation
+// derived from the real bundled data, so a catalog edit flows into these tests instead of
+// redding on a stale copy.
+const PRESETS = hydratePresets(bundledPresets as AutoRouterPresetsResponse);
+const getAllPresets = (): AutoRouterPreset[] => PRESETS;
+const getPresetByKey = (key: string): AutoRouterPreset | undefined => PRESETS.find((p) => p.key === key);
+
 describe("autorouter_presets", () => {
-  it("loads exactly the bundled presets", () => {
+  it("hydrates exactly the bundled presets", () => {
     const presets = getAllPresets();
     expect(presets.map((p) => p.label).sort()).toEqual(["Anthropic Family", "Gemini Family", "Lite", "OpenAI Family"]);
     // Every preset carries all four fields the UI relies on; a JSON typo dropping one fails here.
