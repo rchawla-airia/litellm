@@ -9926,6 +9926,31 @@ class TestHeuristicFirstConfig:
         assert config.uses_llm_classifier is True
         assert ComplexityRouterConfig(tiers=dict(HEURISTIC_FIRST_TIERS)).uses_llm_classifier is False
 
+    @pytest.mark.parametrize("classifier_type", ["heuristic", "llm", "custom"])
+    def test_boundary_margin_rejected_on_every_other_classifier_type(self, classifier_type):
+        config: dict[str, object] = {
+            "tiers": dict(HEURISTIC_FIRST_TIERS),
+            "classifier_type": classifier_type,
+            "heuristic_first_boundary_margin": 0.05,
+        }
+        if classifier_type == "llm":
+            config["classifier_llm_config"] = {"model": "haiku-classifier"}
+        if classifier_type == "custom":
+            config["classifier_plugin"] = _FixedTierClassifier("SIMPLE")
+        with pytest.raises(ValidationError, match="heuristic_first_boundary_margin is set"):
+            ComplexityRouterConfig(**config)
+
+    @pytest.mark.parametrize("margin", [-0.01, 1.01])
+    def test_boundary_margin_must_be_between_zero_and_one(self, margin):
+        with pytest.raises(ValidationError, match="heuristic_first_boundary_margin"):
+            ComplexityRouterConfig(
+                tiers=dict(HEURISTIC_FIRST_TIERS),
+                classifier_type="heuristic_first",
+                heuristic_first_max_tier="SIMPLE",
+                classifier_llm_config={"model": "haiku-classifier"},
+                heuristic_first_boundary_margin=margin,
+            )
+
 
 class TestHeuristicFirst:
     """Behavior of the heuristic-first chain: when the classifier call is skipped, and when it is not."""
@@ -9942,6 +9967,48 @@ class TestHeuristicFirst:
         assert outcome.score is not None
         assert outcome.signals
         assert outcome.classifier_cost is None
+
+    @pytest.mark.asyncio
+    async def test_near_boundary_prompt_escalates_when_margin_is_set(self, mock_router_instance):
+        mock_router_instance.acompletion = AsyncMock(return_value=_llm_response('{"tier": "COMPLEX"}'))
+        router = _heuristic_first_router(mock_router_instance, heuristic_first_boundary_margin=0.03)
+        outcome = await router.aclassify(
+            "design a distributed cache with consistent hashing, then explain the failure modes step by step"
+        )
+        mock_router_instance.acompletion.assert_awaited_once()
+        assert outcome.tier == ComplexityTier.COMPLEX
+        assert outcome.cause == "llm_classifier"
+
+    @pytest.mark.asyncio
+    async def test_score_outside_boundary_margin_still_short_circuits(self, mock_router_instance):
+        mock_router_instance.acompletion = AsyncMock()
+        router = _heuristic_first_router(mock_router_instance, heuristic_first_boundary_margin=0.03)
+        outcome = await router.aclassify("explain step by step how consistent hashing rebalances keys")
+        mock_router_instance.acompletion.assert_not_called()
+        assert outcome.tier == ComplexityTier.SIMPLE
+        assert outcome.cause == "heuristic_first_short_circuit"
+
+    @pytest.mark.asyncio
+    async def test_zero_margin_escalates_exact_boundary_score(self, mock_router_instance):
+        mock_router_instance.acompletion = AsyncMock(return_value=_llm_response('{"tier": "MEDIUM"}'))
+        router = _heuristic_first_router(
+            mock_router_instance,
+            tier_boundaries={
+                "simple_medium": 0.19999999999999998,
+                "medium_complex": 0.35,
+                "complex_reasoning": 0.60,
+            },
+            heuristic_first_max_tier="MEDIUM",
+            heuristic_first_boundary_margin=0,
+        )
+        tier, score, signals, _cause = router._score_and_classify("write a python function")
+        assert tier == ComplexityTier.MEDIUM
+        assert score == pytest.approx(0.2)
+        assert signals == ("short (5 tokens)", "code (function, python)")
+        outcome = await router.aclassify("write a python function")
+        mock_router_instance.acompletion.assert_awaited_once()
+        assert outcome.tier == ComplexityTier.MEDIUM
+        assert outcome.cause == "llm_classifier"
 
     @pytest.mark.asyncio
     async def test_no_signal_prompt_escalates_even_though_it_scores_simple(self, mock_router_instance):

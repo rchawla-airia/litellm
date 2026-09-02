@@ -650,6 +650,16 @@ class ComplexityRouterConfig(BaseModel):
             "may not name the highest one, since that would make the LLM classifier unreachable."
         ),
     )
+    heuristic_first_boundary_margin: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description=(
+            "Under classifier_type 'heuristic_first', send a signalled request to the LLM classifier when "
+            "its heuristic score is within this margin of any active tier boundary. Unset preserves the "
+            "current signal-only gate, and 0 includes exact boundary scores. Rejected for other classifier types."
+        ),
+    )
     classifier_plugin: ClassifierPlugin | None = Field(
         default=None,
         description=(
@@ -1123,6 +1133,15 @@ class ComplexityRouterConfig(BaseModel):
                 f"heuristic_first_max_tier {threshold} has no model configured in tiers; a threshold pointing at "
                 "an unconfigured tier would route short-circuited requests to the default fallback instead of the "
                 "pool the operator intended"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_heuristic_first_boundary_margin(self) -> "ComplexityRouterConfig":
+        if self.classifier_type != "heuristic_first" and self.heuristic_first_boundary_margin is not None:
+            raise ValueError(
+                f"heuristic_first_boundary_margin is set but classifier_type is {self.classifier_type!r}; "
+                "set classifier_type 'heuristic_first' or remove heuristic_first_boundary_margin"
             )
         return self
 

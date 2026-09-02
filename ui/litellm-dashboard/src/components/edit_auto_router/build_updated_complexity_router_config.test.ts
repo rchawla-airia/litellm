@@ -498,6 +498,7 @@ describe("managed keys survive an untouched open-and-save", () => {
     tier_labels: { SIMPLE: "Cheap" },
     classifier_type: "heuristic_first",
     heuristic_first_max_tier: "SIMPLE",
+    heuristic_first_boundary_margin: 0.03,
     classifier_llm_config: { model: "gpt-4o-mini", timeout_ms: 3000 },
     classifier_context_window_size: 5,
     classifier_context_budget_chars: 4000,
@@ -586,6 +587,8 @@ describe("managed keys survive an untouched open-and-save", () => {
   it("round-trips the heuristic_first threshold, which save requires and the backend rejects without", () => {
     const hydrated = hydrateComplexityRouterConfig(STORED_ALL_MANAGED, undefined);
     expect(hydrated.heuristic_first_max_tier).toBe("SIMPLE");
+    expect(hydrated.heuristic_first_boundary_margin).toBe(0.03);
     expect(buildUpdatedComplexityRouterConfig(STORED_ALL_MANAGED, hydrated).heuristic_first_max_tier).toBe("SIMPLE");
+    expect(buildUpdatedComplexityRouterConfig(STORED_ALL_MANAGED, hydrated).heuristic_first_boundary_margin).toBe(0.03);
   });
 });

@@ -46,6 +46,7 @@ const DEFAULT_SCORING_EXPLANATION =
 const CLASSIFIER_TIMEOUT_ID = "classifier-timeout-ms";
 const CLASSIFIER_CONTEXT_WINDOW_SIZE_ID = "classifier-context-window-size";
 const CLASSIFIER_CONTEXT_BUDGET_CHARS_ID = "classifier-context-budget-chars";
+const HEURISTIC_FIRST_BOUNDARY_MARGIN_ID = "heuristic-first-boundary-margin";
 
 const CUSTOM_PROMPT_WITH_HEURISTIC_FALLBACK =
   "This router classifies with your own prompt, so the tier comes from whatever rubric it states. The four tier " +
@@ -247,12 +248,25 @@ const ClassificationMethodConfig: React.FC<ClassificationMethodConfigProps> = ({
         classifierType === "heuristic_first"
           ? value.heuristic_first_max_tier ?? DEFAULT_HEURISTIC_FIRST_MAX_TIER
           : undefined,
+      heuristic_first_boundary_margin:
+        classifierType === "heuristic_first" ? value.heuristic_first_boundary_margin : undefined,
     };
     onChange(nextValue);
   };
 
   const handleHeuristicFirstMaxTierChange = (tier: string) => {
     onChange({ ...value, heuristic_first_max_tier: tier });
+  };
+
+  const handleHeuristicFirstBoundaryMarginChange = (raw: string) => {
+    setDraft({ id: HEURISTIC_FIRST_BOUNDARY_MARGIN_ID, raw });
+    if (raw.trim() === "") {
+      onChange({ ...value, heuristic_first_boundary_margin: undefined });
+      return;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return;
+    onChange({ ...value, heuristic_first_boundary_margin: Math.min(1, Math.max(0, parsed)) });
   };
 
   const handleClassificationPromptChange = (classificationPrompt: string | undefined) => {
@@ -372,6 +386,29 @@ const ClassificationMethodConfig: React.FC<ClassificationMethodConfigProps> = ({
             A request the scorer places at or below this tier routes there without a classifier call. Anything the
             scorer places higher, and anything it found no signal for at all, goes to the classifier instead
           </p>
+          <div className="space-y-2">
+            <Label htmlFor={HEURISTIC_FIRST_BOUNDARY_MARGIN_ID}>Boundary margin</Label>
+            <Input
+              id={HEURISTIC_FIRST_BOUNDARY_MARGIN_ID}
+              type="text"
+              inputMode="decimal"
+              min={0}
+              max={1}
+              step={0.01}
+              value={
+                draft?.id === HEURISTIC_FIRST_BOUNDARY_MARGIN_ID
+                  ? draft.raw
+                  : value.heuristic_first_boundary_margin?.toString() ?? ""
+              }
+              onChange={(event) => handleHeuristicFirstBoundaryMarginChange(event.target.value)}
+              onBlur={() => setDraft(null)}
+              placeholder="Off"
+            />
+            <p className="text-sm text-muted-foreground">
+              Send scores within this distance of any tier boundary to the classifier. Leave empty to use the scorer
+              alone whenever it has a signal
+            </p>
+          </div>
         </div>
       )}
 

@@ -34505,6 +34505,11 @@ export interface components {
              */
             fallback_tier?: string | null;
             /**
+             * Heuristic First Boundary Margin
+             * @description Under classifier_type 'heuristic_first', send a signalled request to the LLM classifier when its heuristic score is within this margin of any active tier boundary. Unset preserves the current signal-only gate, and 0 includes exact boundary scores. Rejected for other classifier types.
+             */
+            heuristic_first_boundary_margin?: number | null;
+            /**
              * Heuristic First Max Tier
              * @description The highest tier the local scorer may decide on its own; required when classifier_type is 'heuristic_first' and rejected otherwise. A request whose heuristic tier is at or below this one skips the LLM classifier and routes straight to that heuristic tier, so the classifier call is only paid for on traffic the scorer could not place cheaply. The scorer must also have produced at least one signal: a prompt where no dimension fired scores 0.0 and would otherwise land SIMPLE by default rather than by evidence, which is how a chained router would silently send unclassified traffic to the cheapest model. Names a built-in tier, and may not name the highest one, since that would make the LLM classifier unreachable.
              */

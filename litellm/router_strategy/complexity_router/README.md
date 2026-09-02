@@ -216,12 +216,15 @@ model_list:
         heuristic_first_max_tier: SIMPLE
         classifier_llm_config:
           model: gpt-4o-mini
+        heuristic_first_boundary_margin: 0.03
         tiers:
           SIMPLE: gpt-4o-mini
           MEDIUM: gpt-4o
           COMPLEX: claude-sonnet-4
           REASONING: o1-preview
 ```
+
+`heuristic_first_boundary_margin` is optional. When set, a signalled request whose score is within that distance of any tier boundary goes to the LLM classifier instead of short-circuiting. This breaks ties where the heuristic score is close to a tier change. Set it to `0` to escalate exact boundary scores. Leave it unset to preserve the signal-only behavior
 
 A request short-circuits, meaning it routes on the scorer's own tier with no classifier call, when
 two things hold: the scorer landed at or below `heuristic_first_max_tier`, and it produced at least

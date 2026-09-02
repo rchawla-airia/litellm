@@ -397,6 +397,8 @@ export interface ComplexityRouterConfigValue {
   classification_prompt?: string;
   /** Highest tier the scorer may decide alone under heuristic_first. Required by that type, rejected by the others. */
   heuristic_first_max_tier?: string;
+  /** Optional score band around each tier boundary that escalates to the LLM classifier. */
+  heuristic_first_boundary_margin?: number;
   classification_mode?: ClassificationMode;
   session_affinity?: boolean;
   modality_routing?: boolean;

@@ -1230,6 +1230,15 @@ class ComplexityRouter(CustomLogger):
 
         return tier, weighted_score, tuple(signals), "heuristic_scorer"
 
+    def _is_near_tier_boundary(self, score: float, margin: float) -> bool:
+        boundaries: Final = self._effective_tier_boundaries()
+        active_boundaries: Final = (
+            boundaries["simple_medium"],
+            boundaries["medium_complex"],
+            boundaries["complex_reasoning"],
+        )
+        return any(abs(score - boundary) <= margin for boundary in active_boundaries)
+
     def _effective_reasoning_override_min_score(self) -> float:
         """The score a request must reach before the reasoning-marker override may promote it.
 
@@ -1378,10 +1387,12 @@ class ComplexityRouter(CustomLogger):
         tier, score, signals, cause = self._score_and_classify(prompt, system_prompt)
         scored: Final = ClassificationOutcome(tier=tier, score=score, signals=signals, cause=cause)
         threshold: Final = self.config.heuristic_first_max_tier
+        boundary_margin: Final = self.config.heuristic_first_boundary_margin
         decided_cheaply: Final = (
             threshold is not None
             and bool(signals)
             and self._active_tier_severity(tier) <= self._active_tier_severity(threshold)
+            and not (boundary_margin is not None and self._is_near_tier_boundary(score, boundary_margin))
         )
         if decided_cheaply:
             return ClassificationOutcome(tier=tier, score=score, signals=signals, cause="heuristic_first_short_circuit")

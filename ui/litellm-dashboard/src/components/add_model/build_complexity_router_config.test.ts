@@ -770,16 +770,18 @@ describe("heuristic_first", () => {
     ...baseParams,
     classifierType: "heuristic_first",
     heuristicFirstMaxTier: "SIMPLE",
+    heuristicFirstBoundaryMargin: 0.03,
     classifierLlmConfig: { model: "gpt-4o-mini", timeout_ms: 3000 },
     classifierContextWindowSize: 5,
     classifierContextBudgetChars: 4000,
     classifierFallback: "default_model",
   };
 
-  it("emits heuristic_first_max_tier", () => {
+  it("emits heuristic_first settings", () => {
     const config = buildComplexityRouterConfig(heuristicFirstParams);
     expect(config.classifier_type).toBe("heuristic_first");
     expect(config.heuristic_first_max_tier).toBe("SIMPLE");
+    expect(config.heuristic_first_boundary_margin).toBe(0.03);
   });
 
   it("keeps every classifier key the operator set, since heuristic_first still calls the classifier", () => {
@@ -794,6 +796,7 @@ describe("heuristic_first", () => {
     for (const classifierType of ["heuristic", "llm"] as const) {
       const config = buildComplexityRouterConfig({ ...heuristicFirstParams, classifierType });
       expect(config.heuristic_first_max_tier).toBeUndefined();
+      expect(config.heuristic_first_boundary_margin).toBeUndefined();
     }
   });
 });
@@ -905,9 +908,11 @@ describe("buildComplexityRouterConfig with an edited tier set", () => {
       dimensionWeights: { length: 1 },
       reasoningOverrideMinScore: 0.5,
       heuristicFirstMaxTier: "SIMPLE",
+      heuristicFirstBoundaryMargin: 0.03,
       customTechnicalKeywords: ["kubernetes"],
     };
-    const emittingType = key === "heuristic_first_max_tier" ? "heuristic_first" : "llm";
+    const emittingType =
+      key === "heuristic_first_max_tier" || key === "heuristic_first_boundary_margin" ? "heuristic_first" : "llm";
     expect(buildComplexityRouterConfig({ ...baseParams, ...loaded, classifierType: emittingType })).toHaveProperty(key);
     expect(build(loaded)).not.toHaveProperty(key);
   });
